@@ -28,7 +28,7 @@ jobs:
       - name: Build AutoTecla.exe
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          go build -ldflags="-s -w" -o dist/AutoTecla.exe .
+          go build -ldflags="-s -w -H windowsgui" -o dist/AutoTecla.exe .
 
       - name: Upload AutoTecla.exe
         uses: actions/upload-artifact@v4
