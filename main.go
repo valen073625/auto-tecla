@@ -41,13 +41,13 @@ const (
 	wmTimer   = 0x0113
 	wmSetFont = 0x0030
 
-	wsOverlappedWindow = 0x00CF0000
-	wsVisible          = 0x10000000
-	wsChild            = 0x40000000
-	wsTabstop          = 0x00010000
-	wsBorder           = 0x00800000
-	esAutoHScroll      = 0x0080
-	wsExClientEdge     = 0x00000200
+	wsOverlappedWindow uint32 = 0x00CF0000
+	wsChild            uint32 = 0x40000000
+	wsVisible          uint32 = 0x10000000
+	wsTabstop          uint32 = 0x00010000
+	wsBorder           uint32 = 0x00800000
+	esAutoHScroll      uint32 = 0x0080
+	wsExClientEdge     uint32 = 0x00000200
 
 	swShow     = 5
 	idcArrow   = 32512
@@ -231,13 +231,11 @@ func onTimer() {
 		toggle()
 	}
 	prevF6 = f6
-
 	esc := keyDown(vkEscape)
 	if esc && !prevEsc && running {
 		stop()
 	}
 	prevEsc = esc
-
 	if running && !time.Now().Before(nextAt) {
 		tap(target, hold)
 		count++
@@ -285,7 +283,6 @@ func main() {
 	inst, _, _ := procGetModuleHandle.Call(0)
 	className := utf16("AutoTeclaWindow")
 	cursor, _, _ := procLoadCursor.Call(0, idcArrow)
-
 	wc := wndClassEx{
 		size:       uint32(unsafe.Sizeof(wndClassEx{})),
 		wndProc:    wndProcCB,
@@ -298,31 +295,31 @@ func main() {
 		alert("No se pudo crear la ventana.")
 		return
 	}
-
 	hwnd, _, _ := procCreateWindowEx.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(utf16("Auto Tecla"))),
-		wsOverlappedWindow|wsVisible,
+		uintptr(wsOverlappedWindow|wsVisible),
 		uintptr(200), uintptr(160), uintptr(460), uintptr(340),
 		0, 0, inst, 0,
 	)
 	hwndMain = syscall.Handle(hwnd)
 
+	height := int64(-16)
 	font, _, _ = procCreateFont.Call(
-		uintptr(int64(-16)), 0, 0, 0, 400, 0, 0, 0,
+		uintptr(height), 0, 0, 0, 400, 0, 0, 0,
 		0, 0, 0, 5, 0,
 		uintptr(unsafe.Pointer(utf16("Segoe UI"))),
 	)
 
 	label := wsChild | wsVisible
 	edit := wsChild | wsVisible | wsTabstop | wsBorder | esAutoHScroll
-	createControl("STATIC", "Tecla", label, 0, 24, 28, 100, 22, 0)
-	hwndKey = createControl("EDIT", "space", edit, wsExClientEdge, 140, 24, 280, 26, idKey)
-	createControl("STATIC", "Cada (segundos)", label, 0, 24, 68, 110, 22, 0)
-	hwndInterval = createControl("EDIT", "0.5", edit, wsExClientEdge, 140, 64, 280, 26, idInterval)
-	createControl("STATIC", "Mantener (seg)", label, 0, 24, 108, 110, 22, 0)
-	hwndHold = createControl("EDIT", "0.03", edit, wsExClientEdge, 140, 104, 280, 26, idHold)
+	createControl("STATIC", "Tecla", label, 0, 24, 28, 110, 22, 0)
+	hwndKey = createControl("EDIT", "space", edit, wsExClientEdge, 150, 24, 270, 26, idKey)
+	createControl("STATIC", "Cada (segundos)", label, 0, 24, 68, 120, 22, 0)
+	hwndInterval = createControl("EDIT", "0.5", edit, wsExClientEdge, 150, 64, 270, 26, idInterval)
+	createControl("STATIC", "Mantener (seg)", label, 0, 24, 108, 120, 22, 0)
+	hwndHold = createControl("EDIT", "0.03", edit, wsExClientEdge, 150, 104, 270, 26, idHold)
 	hwndStart = createControl("BUTTON", "Iniciar", wsChild|wsVisible|wsTabstop, 0, 24, 156, 396, 36, idStart)
 	hwndStatus = createControl("STATIC", "Detenido. F6 inicia o para. Cierra la ventana para salir.", label, 0, 24, 210, 400, 48, idStatus)
 
