@@ -8,64 +8,42 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
 )
 
 var (
 	user32               = syscall.NewLazyDLL("user32.dll")
-	procSendInput        = user32.NewProc("SendInput")
+	procKeybdEvent       = user32.NewProc("keybd_event")
 	procGetAsyncKeyState = user32.NewProc("GetAsyncKeyState")
+	procMapVirtualKey    = user32.NewProc("MapVirtualKeyW")
 )
 
 const (
-	inputKeyboard  = 1
 	keyeventfKeyup = 0x0002
 	vkF6           = 0x75
 	vkEscape       = 0x1B
 )
 
-type keybdInput struct {
-	wVk         uint16
-	wScan       uint16
-	dwFlags     uint32
-	time        uint32
-	dwExtraInfo uintptr
-}
-
-// Windows INPUT is 40 bytes on amd64 (4 type + 4 pad + 32-byte union).
-type winInput struct {
-	inputType uint32
-	_         [4]byte
-	ki        keybdInput
-	_         [12]byte
-}
-
-func sendKey(vk uint16, up bool) {
-	flags := uint32(0)
-	if up {
-		flags = keyeventfKeyup
+func tap(vk uint16, hold time.Duration) {
+	scan, _, _ := procMapVirtualKey.Call(uintptr(vk), 0)
+	procKeybdEvent.Call(uintptr(vk), scan, 0, 0)
+	if hold > 0 {
+		time.Sleep(hold)
 	}
-	inp := winInput{
-		inputType: inputKeyboard,
-		ki: keybdInput{
-			wVk:     vk,
-			dwFlags: flags,
-		},
-	}
-	procSendInput.Call(1, uintptr(unsafe.Pointer(&inp)), unsafe.Sizeof(inp))
+	procKeybdEvent.Call(uintptr(vk), scan, keyeventfKeyup, 0)
 }
 
 func keyDown(vk int) bool {
 	r, _, _ := procGetAsyncKeyState.Call(uintptr(vk))
-	return r&0x8000 != 0
+	return uint16(r)&0x8000 != 0
 }
 
 func parseKey(name string) (uint16, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	special := map[string]uint16{
-		"space": 0x20, "enter": 0x0D, "return": 0x0D, "tab": 0x09,
+		"space": 0x20, "espacio": 0x20, "enter": 0x0D, "return": 0x0D, "intro": 0x0D, "tab": 0x09,
 		"esc": 0x1B, "escape": 0x1B, "shift": 0x10, "ctrl": 0x11, "control": 0x11, "alt": 0x12,
-		"up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+		"up": 0x26, "arriba": 0x26, "down": 0x28, "abajo": 0x28, "left": 0x25, "izquierda": 0x25,
+		"right": 0x27, "derecha": 0x27,
 		"backspace": 0x08, "delete": 0x2E, "home": 0x24, "end": 0x23,
 		"pageup": 0x21, "page_up": 0x21, "pagedown": 0x22, "page_down": 0x22,
 		"f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73, "f5": 0x74, "f6": 0x75,
@@ -93,47 +71,47 @@ func readLine(r *bufio.Reader, prompt string) string {
 }
 
 func main() {
-	fmt.Println(strings.Repeat("=", 50))
-	fmt.Println("       AUTO TECLA - Pulsación automática")
-	fmt.Println(strings.Repeat("=", 50))
+	fmt.Println("AUTO TECLA")
+	fmt.Println("Pulsa teclas en la ventana que tengas enfocada.")
 	fmt.Println()
 
 	in := bufio.NewReader(os.Stdin)
-	keyName := readLine(in, "Tecla a pulsar (ej: w, space, enter, f): ")
+	keyName := readLine(in, "Tecla (w, space, enter, f...): ")
 	vk, ok := parseKey(keyName)
 	if !ok {
 		fmt.Println("Tecla no reconocida.")
+		fmt.Println("Pulsa Enter para cerrar.")
+		readLine(in, "")
 		return
 	}
 
 	interval := 0.5
-	if s := readLine(in, "Intervalo en segundos (ej: 0.5): "); s != "" {
+	if s := readLine(in, "Intervalo en segundos (0.5): "); s != "" {
+		s = strings.ReplaceAll(s, ",", ".")
 		if v, err := strconv.ParseFloat(s, 64); err == nil && v > 0 {
 			interval = v
 		}
 	}
-	hold := 0.05
-	if s := readLine(in, "Tiempo de pulsación/hold (ej: 0.05): "); s != "" {
+	holdSec := 0.03
+	if s := readLine(in, "Hold en segundos (0.03): "); s != "" {
+		s = strings.ReplaceAll(s, ",", ".")
 		if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 0 {
-			hold = v
+			holdSec = v
 		}
 	}
+	hold := time.Duration(holdSec * float64(time.Second))
 
 	fmt.Println()
-	fmt.Println(strings.Repeat("-", 50))
-	fmt.Printf("Tecla: %s\nIntervalo: %gs\nHold: %gs\n", keyName, interval, hold)
-	fmt.Println(strings.Repeat("-", 50))
-	fmt.Println()
-	fmt.Println("Controles:")
-	fmt.Println("  F6  -> Iniciar / Detener")
-	fmt.Println("  Esc -> Salir")
-	fmt.Println()
-	fmt.Println("Cambia a la ventana donde quieres las pulsaciones.")
-	fmt.Println("Esperando... (presiona F6 cuando estés listo)")
+	fmt.Printf("Tecla %s | cada %g s | hold %g s\n", keyName, interval, holdSec)
+	fmt.Println("1. Deja esta ventana abierta")
+	fmt.Println("2. Haz clic en el Bloc de notas (u otra ventana)")
+	fmt.Println("3. Pulsa F6 para empezar o parar")
+	fmt.Println("4. Pulsa Esc para salir")
 
 	running := false
 	prevF6 := false
 	prevEsc := false
+	var count int
 	next := time.Now()
 
 	for {
@@ -141,34 +119,30 @@ func main() {
 		if f6 && !prevF6 {
 			running = !running
 			if running {
-				fmt.Println("\n>>> Auto Tecla INICIADO <<<")
+				fmt.Println("\nINICIADO. La tecla va a la ventana enfocada.")
 				next = time.Now()
 			} else {
-				fmt.Println("\n>>> Auto Tecla DETENIDO <<<")
+				fmt.Printf("\nDETENIDO. Pulsaciones: %d\n", count)
 			}
 		}
 		prevF6 = f6
 
-		esc := keyDown(vkEscape)
-		if esc && !prevEsc {
-			fmt.Println("\nSaliendo...")
+		if keyDown(vkEscape) && !prevEsc {
+			fmt.Println("\nSalir.")
 			return
 		}
-		prevEsc = esc
+		prevEsc = keyDown(vkEscape)
 
 		if running && !time.Now().Before(next) {
-			sendKey(vk, false)
-			if hold > 0 {
-				time.Sleep(time.Duration(hold * float64(time.Second)))
+			tap(vk, hold)
+			count++
+			fmt.Printf("\rPulsaciones: %d   ", count)
+			gap := time.Duration(interval*float64(time.Second)) - hold
+			if gap < 10*time.Millisecond {
+				gap = 10 * time.Millisecond
 			}
-			sendKey(vk, true)
-			gap := interval - hold
-			if gap < 0.01 {
-				gap = 0.01
-			}
-			next = time.Now().Add(time.Duration(gap * float64(time.Second)))
+			next = time.Now().Add(gap)
 		}
-
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
