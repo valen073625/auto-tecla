@@ -13,26 +13,26 @@ var (
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 
-	procRegisterClassEx    = user32.NewProc("RegisterClassExW")
-	procCreateWindowEx     = user32.NewProc("CreateWindowExW")
-	procDefWindowProc      = user32.NewProc("DefWindowProcW")
-	procGetMessage         = user32.NewProc("GetMessageW")
-	procTranslateMessage   = user32.NewProc("TranslateMessage")
-	procDispatchMessage    = user32.NewProc("DispatchMessageW")
-	procPostQuitMessage    = user32.NewProc("PostQuitMessage")
-	procShowWindow         = user32.NewProc("ShowWindow")
-	procUpdateWindow       = user32.NewProc("UpdateWindow")
-	procLoadCursor         = user32.NewProc("LoadCursorW")
-	procSetWindowText      = user32.NewProc("SetWindowTextW")
-	procGetWindowText      = user32.NewProc("GetWindowTextW")
-	procSendMessage        = user32.NewProc("SendMessageW")
-	procSetTimer           = user32.NewProc("SetTimer")
-	procMessageBox         = user32.NewProc("MessageBoxW")
-	procGetModuleHandle    = kernel32.NewProc("GetModuleHandleW")
-	procCreateFont         = gdi32.NewProc("CreateFontW")
-	procKeybdEvent         = user32.NewProc("keybd_event")
-	procGetAsyncKeyState   = user32.NewProc("GetAsyncKeyState")
-	procMapVirtualKey      = user32.NewProc("MapVirtualKeyW")
+	procRegisterClassEx  = user32.NewProc("RegisterClassExW")
+	procCreateWindowEx   = user32.NewProc("CreateWindowExW")
+	procDefWindowProc    = user32.NewProc("DefWindowProcW")
+	procGetMessage       = user32.NewProc("GetMessageW")
+	procTranslateMessage = user32.NewProc("TranslateMessage")
+	procDispatchMessage  = user32.NewProc("DispatchMessageW")
+	procPostQuitMessage  = user32.NewProc("PostQuitMessage")
+	procShowWindow       = user32.NewProc("ShowWindow")
+	procUpdateWindow     = user32.NewProc("UpdateWindow")
+	procLoadCursor       = user32.NewProc("LoadCursorW")
+	procSetWindowText    = user32.NewProc("SetWindowTextW")
+	procGetWindowText    = user32.NewProc("GetWindowTextW")
+	procSendMessage      = user32.NewProc("SendMessageW")
+	procSetTimer         = user32.NewProc("SetTimer")
+	procMessageBox       = user32.NewProc("MessageBoxW")
+	procGetModuleHandle  = kernel32.NewProc("GetModuleHandleW")
+	procCreateFont       = gdi32.NewProc("CreateFontW")
+	procKeybdEvent       = user32.NewProc("keybd_event")
+	procGetAsyncKeyState = user32.NewProc("GetAsyncKeyState")
+	procMapVirtualKey    = user32.NewProc("MapVirtualKeyW")
 )
 
 const (
@@ -265,7 +265,7 @@ func wndProc(hwnd syscall.Handle, message uint32, wparam, lparam uintptr) uintpt
 }
 
 func createControl(class, text string, style, ex uint32, x, y, w, h int, id int) syscall.Handle {
-	h, _, _ := procCreateWindowEx.Call(
+	hwnd, _, _ := procCreateWindowEx.Call(
 		uintptr(ex),
 		uintptr(unsafe.Pointer(utf16(class))),
 		uintptr(unsafe.Pointer(utf16(text))),
@@ -275,10 +275,10 @@ func createControl(class, text string, style, ex uint32, x, y, w, h int, id int)
 		uintptr(id),
 		0, 0,
 	)
-	if font != 0 {
-		procSendMessage.Call(h, wmSetFont, font, 1)
+	if font != 0 && hwnd != 0 {
+		procSendMessage.Call(hwnd, wmSetFont, font, 1)
 	}
-	return syscall.Handle(h)
+	return syscall.Handle(hwnd)
 }
 
 func main() {
@@ -299,32 +299,32 @@ func main() {
 		return
 	}
 
-	h, _, _ := procCreateWindowEx.Call(
+	hwnd, _, _ := procCreateWindowEx.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(utf16("Auto Tecla"))),
 		wsOverlappedWindow|wsVisible,
-		uintptr(200), uintptr(160), uintptr(460), uintptr(320),
+		uintptr(200), uintptr(160), uintptr(460), uintptr(340),
 		0, 0, inst, 0,
 	)
-	hwndMain = syscall.Handle(h)
+	hwndMain = syscall.Handle(hwnd)
 
 	font, _, _ = procCreateFont.Call(
-		uintptr(0xFFFFFFF0), 0, 0, 0, 400, 0, 0, 0,
+		uintptr(int64(-16)), 0, 0, 0, 400, 0, 0, 0,
 		0, 0, 0, 5, 0,
 		uintptr(unsafe.Pointer(utf16("Segoe UI"))),
 	)
 
 	label := wsChild | wsVisible
 	edit := wsChild | wsVisible | wsTabstop | wsBorder | esAutoHScroll
-	createControl("STATIC", "Tecla", label, 0, 24, 28, 90, 22, 0)
-	hwndKey = createControl("EDIT", "space", edit, wsExClientEdge, 130, 24, 280, 26, idKey)
-	createControl("STATIC", "Cada (segundos)", label, 0, 24, 68, 100, 22, 0)
-	hwndInterval = createControl("EDIT", "0.5", edit, wsExClientEdge, 130, 64, 280, 26, idInterval)
-	createControl("STATIC", "Mantener (seg)", label, 0, 24, 108, 100, 22, 0)
-	hwndHold = createControl("EDIT", "0.03", edit, wsExClientEdge, 130, 104, 280, 26, idHold)
-	hwndStart = createControl("BUTTON", "Iniciar", wsChild|wsVisible|wsTabstop, 0, 24, 156, 386, 36, idStart)
-	hwndStatus = createControl("STATIC", "Detenido. F6 inicia o para. Cierra la ventana para salir.", label, 0, 24, 210, 400, 44, idStatus)
+	createControl("STATIC", "Tecla", label, 0, 24, 28, 100, 22, 0)
+	hwndKey = createControl("EDIT", "space", edit, wsExClientEdge, 140, 24, 280, 26, idKey)
+	createControl("STATIC", "Cada (segundos)", label, 0, 24, 68, 110, 22, 0)
+	hwndInterval = createControl("EDIT", "0.5", edit, wsExClientEdge, 140, 64, 280, 26, idInterval)
+	createControl("STATIC", "Mantener (seg)", label, 0, 24, 108, 110, 22, 0)
+	hwndHold = createControl("EDIT", "0.03", edit, wsExClientEdge, 140, 104, 280, 26, idHold)
+	hwndStart = createControl("BUTTON", "Iniciar", wsChild|wsVisible|wsTabstop, 0, 24, 156, 396, 36, idStart)
+	hwndStatus = createControl("STATIC", "Detenido. F6 inicia o para. Cierra la ventana para salir.", label, 0, 24, 210, 400, 48, idStatus)
 
 	procSetTimer.Call(uintptr(hwndMain), timerID, 15, 0)
 	procShowWindow.Call(uintptr(hwndMain), swShow)
