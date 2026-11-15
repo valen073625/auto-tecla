@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,55 +37,55 @@ var (
 )
 
 const (
-	wmDestroy = 0x0002
-	wmCommand = 0x0111
-	wmTimer   = 0x0113
-	wmSetFont = 0x0030
+	wmDestroy uintptr = 0x0002
+	wmCommand uintptr = 0x0111
+	wmTimer   uintptr = 0x0113
+	wmSetFont uintptr = 0x0030
 
-	wsOverlappedWindow uint32 = 0x00CF0000
-	wsChild            uint32 = 0x40000000
-	wsVisible          uint32 = 0x10000000
-	wsTabstop          uint32 = 0x00010000
-	wsBorder           uint32 = 0x00800000
-	esAutoHScroll      uint32 = 0x0080
-	wsExClientEdge     uint32 = 0x00000200
+	wsOverlappedWindow uintptr = 0x00CF0000
+	wsChild            uintptr = 0x40000000
+	wsVisible          uintptr = 0x10000000
+	wsTabstop          uintptr = 0x00010000
+	wsBorder           uintptr = 0x00800000
+	esAutoHScroll      uintptr = 0x0080
+	wsExClientEdge     uintptr = 0x00000200
 
-	swShow     = 5
-	idcArrow   = 32512
-	colorBtn   = 16
-	mbIconWarn = 0x00000030
+	swShow     uintptr = 5
+	idcArrow   uintptr = 32512
+	colorBtn   uintptr = 16
+	mbIconWarn uintptr = 0x30
 
 	idKey      = 101
 	idInterval = 102
 	idHold     = 103
 	idStart    = 104
-	idStatus   = 105
-	timerID    = 1
 
-	keyeventfKeyup = 0x0002
+	timerID uintptr = 1
+
+	keyeventfKeyup uintptr = 0x0002
 	vkF6           = 0x75
 	vkEscape       = 0x1B
 )
 
 type wndClassEx struct {
-	size       uint32
-	style      uint32
-	wndProc    uintptr
-	clsExtra   int32
-	wndExtra   int32
-	instance   syscall.Handle
-	icon       syscall.Handle
-	cursor     syscall.Handle
-	background syscall.Handle
-	menuName   *uint16
-	className  *uint16
-	iconSm     syscall.Handle
+	cbSize    uint32
+	style     uint32
+	lpfn      uintptr
+	clsExtra  int32
+	wndExtra  int32
+	hInst     uintptr
+	hIcon     uintptr
+	hCursor   uintptr
+	hbr       uintptr
+	menuName  *uint16
+	className *uint16
+	hIconSm   uintptr
 }
 
 type point struct{ x, y int32 }
 
-type msg struct {
-	hwnd    syscall.Handle
+type winMsg struct {
+	hwnd    uintptr
 	message uint32
 	_       uint32
 	wparam  uintptr
@@ -95,46 +96,65 @@ type msg struct {
 }
 
 var (
-	hwndMain     syscall.Handle
-	hwndKey      syscall.Handle
-	hwndInterval syscall.Handle
-	hwndHold     syscall.Handle
-	hwndStart    syscall.Handle
-	hwndStatus   syscall.Handle
-	font         uintptr
+	hwndMain     uintptr
+	hwndKey      uintptr
+	hwndInterval uintptr
+	hwndHold     uintptr
+	hwndStart    uintptr
+	hwndStatus   uintptr
 
-	running bool
-	prevF6  bool
-	prevEsc bool
-	count   int
-	nextAt  time.Time
-	target  uint16
-	hold    time.Duration
-	gap     time.Duration
+	className = wide("AutoTeclaWindow")
+	fontName  = wide("Segoe UI")
 
-	wndProcCB = syscall.NewCallback(wndProc)
+	running   bool
+	prevF6    bool
+	prevEsc   bool
+	count     int
+	nextAt    time.Time
+	releaseAt time.Time
+	keyHeld   bool
+	target    uint16
+	holdFor   time.Duration
+	gapFor    time.Duration
 )
 
-func utf16(s string) *uint16 {
-	p, err := syscall.UTF16PtrFromString(s)
-	if err != nil {
-		p, _ = syscall.UTF16PtrFromString("")
+func wide(s string) []uint16 {
+	b, err := syscall.UTF16FromString(s)
+	if err != nil || len(b) == 0 {
+		return []uint16{0}
 	}
-	return p
+	return b
 }
 
-func textOf(hwnd syscall.Handle) string {
-	buf := make([]uint16, 64)
-	procGetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-	return syscall.UTF16ToString(buf)
-}
-
-func setText(hwnd syscall.Handle, s string) {
-	procSetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(utf16(s))))
+func ptr(b []uint16) uintptr {
+	return uintptr(unsafe.Pointer(&b[0]))
 }
 
 func alert(text string) {
-	procMessageBox.Call(uintptr(hwndMain), uintptr(unsafe.Pointer(utf16(text))), uintptr(unsafe.Pointer(utf16("Auto Tecla"))), mbIconWarn)
+	body := wide(text)
+	title := wide("Auto Tecla")
+	procMessageBox.Call(hwndMain, ptr(body), ptr(title), mbIconWarn)
+	runtime.KeepAlive(body)
+	runtime.KeepAlive(title)
+}
+
+func setText(hwnd uintptr, s string) {
+	if hwnd == 0 {
+		return
+	}
+	b := wide(s)
+	procSetWindowText.Call(hwnd, ptr(b))
+	runtime.KeepAlive(b)
+}
+
+func textOf(hwnd uintptr) string {
+	if hwnd == 0 {
+		return ""
+	}
+	buf := make([]uint16, 128)
+	procGetWindowText.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	runtime.KeepAlive(buf)
+	return syscall.UTF16ToString(buf)
 }
 
 func keyDown(vk int) bool {
@@ -142,13 +162,20 @@ func keyDown(vk int) bool {
 	return uint16(r)&0x8000 != 0
 }
 
-func tap(vk uint16, d time.Duration) {
+func keyEvent(vk uint16, up bool) {
 	scan, _, _ := procMapVirtualKey.Call(uintptr(vk), 0)
-	procKeybdEvent.Call(uintptr(vk), scan, 0, 0)
-	if d > 0 {
-		time.Sleep(d)
+	flags := uintptr(0)
+	if up {
+		flags = keyeventfKeyup
 	}
-	procKeybdEvent.Call(uintptr(vk), scan, keyeventfKeyup, 0)
+	procKeybdEvent.Call(uintptr(vk), scan, flags, 0)
+}
+
+func releaseKey() {
+	if keyHeld {
+		keyEvent(target, true)
+		keyHeld = false
+	}
 }
 
 func parseKey(name string) (uint16, bool) {
@@ -186,12 +213,11 @@ func parseSeconds(s string, fallback float64) time.Duration {
 	return time.Duration(v * float64(time.Second))
 }
 
-func setStatus(s string) { setText(hwndStatus, s) }
-
 func stop() {
+	releaseKey()
 	running = false
 	setText(hwndStart, "Iniciar")
-	setStatus("Detenido. Pulsaciones: " + strconv.Itoa(count))
+	setText(hwndStatus, "Detenido. Pulsaciones: "+strconv.Itoa(count))
 }
 
 func start() {
@@ -201,20 +227,20 @@ func start() {
 		return
 	}
 	target = vk
-	hold = parseSeconds(textOf(hwndHold), 0.03)
+	holdFor = parseSeconds(textOf(hwndHold), 0.03)
 	interval := parseSeconds(textOf(hwndInterval), 0.5)
-	if interval < 10*time.Millisecond {
-		interval = 10 * time.Millisecond
+	if interval < 15*time.Millisecond {
+		interval = 15 * time.Millisecond
 	}
-	gap = interval - hold
-	if gap < 10*time.Millisecond {
-		gap = 10 * time.Millisecond
+	gapFor = interval
+	if holdFor >= interval {
+		holdFor = interval / 2
 	}
 	count = 0
 	running = true
 	nextAt = time.Now()
 	setText(hwndStart, "Detener")
-	setStatus("En marcha. La tecla va a la ventana enfocada.")
+	setText(hwndStatus, "En marcha. La tecla va a la ventana enfocada.")
 }
 
 func toggle() {
@@ -226,6 +252,15 @@ func toggle() {
 }
 
 func onTimer() {
+	defer func() { recover() }()
+	now := time.Now()
+	if keyHeld && !now.Before(releaseAt) {
+		releaseKey()
+		nextAt = now.Add(gapFor - holdFor)
+		if !nextAt.After(now) {
+			nextAt = now.Add(15 * time.Millisecond)
+		}
+	}
 	f6 := keyDown(vkF6)
 	if f6 && !prevF6 {
 		toggle()
@@ -236,98 +271,111 @@ func onTimer() {
 		stop()
 	}
 	prevEsc = esc
-	if running && !time.Now().Before(nextAt) {
-		tap(target, hold)
+	if running && !keyHeld && !now.Before(nextAt) {
+		keyEvent(target, false)
+		keyHeld = true
+		releaseAt = now.Add(holdFor)
 		count++
-		setStatus("En marcha. Pulsaciones: " + strconv.Itoa(count))
-		nextAt = time.Now().Add(gap)
+		setText(hwndStatus, "En marcha. Pulsaciones: "+strconv.Itoa(count))
 	}
 }
 
-func wndProc(hwnd syscall.Handle, message uint32, wparam, lparam uintptr) uintptr {
-	switch message {
+func wndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
+	switch msg {
 	case wmCommand:
 		if int(wparam&0xFFFF) == idStart {
 			toggle()
+			return 0
 		}
-		return 0
 	case wmTimer:
 		onTimer()
 		return 0
 	case wmDestroy:
+		releaseKey()
 		procPostQuitMessage.Call(0)
 		return 0
 	}
-	r, _, _ := procDefWindowProc.Call(uintptr(hwnd), uintptr(message), wparam, lparam)
+	r, _, _ := procDefWindowProc.Call(hwnd, msg, wparam, lparam)
 	return r
 }
 
-func createControl(class, text string, style, ex uint32, x, y, w, h int, id int) syscall.Handle {
-	hwnd, _, _ := procCreateWindowEx.Call(
-		uintptr(ex),
-		uintptr(unsafe.Pointer(utf16(class))),
-		uintptr(unsafe.Pointer(utf16(text))),
-		uintptr(style),
-		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
-		uintptr(hwndMain),
-		uintptr(id),
-		0, 0,
-	)
-	if font != 0 && hwnd != 0 {
-		procSendMessage.Call(hwnd, wmSetFont, font, 1)
-	}
-	return syscall.Handle(hwnd)
+func createControl(class, text string, style, ex, x, y, w, h, id uintptr) uintptr {
+	cls := wide(class)
+	txt := wide(text)
+	hwnd, _, _ := procCreateWindowEx.Call(ex, ptr(cls), ptr(txt), style, x, y, w, h, hwndMain, id, 0, 0)
+	runtime.KeepAlive(cls)
+	runtime.KeepAlive(txt)
+	return hwnd
 }
 
 func main() {
+	runtime.LockOSThread()
+	cb := syscall.NewCallback(wndProc)
+
 	inst, _, _ := procGetModuleHandle.Call(0)
-	className := utf16("AutoTeclaWindow")
 	cursor, _, _ := procLoadCursor.Call(0, idcArrow)
 	wc := wndClassEx{
-		size:       uint32(unsafe.Sizeof(wndClassEx{})),
-		wndProc:    wndProcCB,
-		instance:   syscall.Handle(inst),
-		cursor:     syscall.Handle(cursor),
-		background: syscall.Handle(colorBtn),
-		className:  className,
+		cbSize:    uint32(unsafe.Sizeof(wndClassEx{})),
+		lpfn:      cb,
+		hInst:     inst,
+		hCursor:   cursor,
+		hbr:       colorBtn,
+		className: &className[0],
 	}
-	if atom, _, _ := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 {
-		alert("No se pudo crear la ventana.")
+	atom, _, err := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc)))
+	runtime.KeepAlive(&wc)
+	if atom == 0 {
+		alert("No se pudo registrar la ventana: " + err.Error())
 		return
 	}
-	hwnd, _, _ := procCreateWindowEx.Call(
+
+	title := wide("Auto Tecla")
+	hwnd, _, err := procCreateWindowEx.Call(
 		0,
-		uintptr(unsafe.Pointer(className)),
-		uintptr(unsafe.Pointer(utf16("Auto Tecla"))),
-		uintptr(wsOverlappedWindow|wsVisible),
-		uintptr(200), uintptr(160), uintptr(460), uintptr(340),
+		ptr(className),
+		ptr(title),
+		wsOverlappedWindow|wsVisible,
+		200, 160, 460, 340,
 		0, 0, inst, 0,
 	)
-	hwndMain = syscall.Handle(hwnd)
+	runtime.KeepAlive(title)
+	if hwnd == 0 {
+		alert("No se pudo abrir la ventana: " + err.Error())
+		return
+	}
+	hwndMain = hwnd
 
 	height := int64(-16)
-	font, _, _ = procCreateFont.Call(
-		uintptr(height), 0, 0, 0, 400, 0, 0, 0,
-		0, 0, 0, 5, 0,
-		uintptr(unsafe.Pointer(utf16("Segoe UI"))),
-	)
+	font, _, _ := procCreateFont.Call(uintptr(height), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, ptr(fontName))
+	runtime.KeepAlive(fontName)
 
 	label := wsChild | wsVisible
 	edit := wsChild | wsVisible | wsTabstop | wsBorder | esAutoHScroll
-	createControl("STATIC", "Tecla", label, 0, 24, 28, 110, 22, 0)
+	btn := wsChild | wsVisible | wsTabstop
+	applyFont := func(h uintptr) {
+		if h != 0 && font != 0 {
+			procSendMessage.Call(h, wmSetFont, font, 1)
+		}
+	}
+	applyFont(createControl("STATIC", "Tecla", label, 0, 24, 28, 120, 22, 0))
 	hwndKey = createControl("EDIT", "space", edit, wsExClientEdge, 150, 24, 270, 26, idKey)
-	createControl("STATIC", "Cada (segundos)", label, 0, 24, 68, 120, 22, 0)
+	applyFont(hwndKey)
+	applyFont(createControl("STATIC", "Cada (segundos)", label, 0, 24, 68, 120, 22, 0))
 	hwndInterval = createControl("EDIT", "0.5", edit, wsExClientEdge, 150, 64, 270, 26, idInterval)
-	createControl("STATIC", "Mantener (seg)", label, 0, 24, 108, 120, 22, 0)
+	applyFont(hwndInterval)
+	applyFont(createControl("STATIC", "Mantener (seg)", label, 0, 24, 108, 120, 22, 0))
 	hwndHold = createControl("EDIT", "0.03", edit, wsExClientEdge, 150, 104, 270, 26, idHold)
-	hwndStart = createControl("BUTTON", "Iniciar", wsChild|wsVisible|wsTabstop, 0, 24, 156, 396, 36, idStart)
-	hwndStatus = createControl("STATIC", "Detenido. F6 inicia o para. Cierra la ventana para salir.", label, 0, 24, 210, 400, 48, idStatus)
+	applyFont(hwndHold)
+	hwndStart = createControl("BUTTON", "Iniciar", btn, 0, 24, 156, 396, 36, idStart)
+	applyFont(hwndStart)
+	hwndStatus = createControl("STATIC", "Detenido. F6 inicia o para. Cierra la ventana para salir.", label, 0, 24, 210, 400, 48, 0)
+	applyFont(hwndStatus)
 
-	procSetTimer.Call(uintptr(hwndMain), timerID, 15, 0)
-	procShowWindow.Call(uintptr(hwndMain), swShow)
-	procUpdateWindow.Call(uintptr(hwndMain))
+	procSetTimer.Call(hwndMain, timerID, 15, 0)
+	procShowWindow.Call(hwndMain, swShow)
+	procUpdateWindow.Call(hwndMain)
 
-	var m msg
+	var m winMsg
 	for {
 		r, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
 		if int32(r) <= 0 {
